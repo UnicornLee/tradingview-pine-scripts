@@ -1,0 +1,18 @@
+// @version=6
+indicator(title="Unicorn Stochastic MACD", shorttitle="USMACD", overlay=false, timeframe="", timeframe_gaps=true)
+
+// 在控制面板添加指标项开关
+at_show_stoch = input(true, title="是否显示 - 随机指标")
+
+// Stochastic
+periodK = input.int(9, title="%K Length", minval=1)
+smoothK = input.int(3, title="%K Smoothing", minval=1)
+periodD = input.int(3, title="%D Smoothing", minval=1)
+k = ta.sma(ta.stoch(close, high, low, periodK), smoothK)
+d = ta.sma(k, periodD)
+plot(k, title="%K", color = at_show_stoch ? color.new(#2962FF, 0) : color.new(#2962FF, 100))
+plot(d, title="%D", color = at_show_stoch ? color.new(#FF6D00, 0) : color.new(#FF6D00, 100))
+h0 = hline(80, "Upper Band", color = at_show_stoch ? color.new(#787B86 , 0) : color.new(#787B86 , 100))
+hline(50, "Middle Band", color = at_show_stoch ? color.new(#787B86, 0) : color.new(#787B86, 100))
+h1 = hline(20, "Lower Band", color = at_show_stoch ? color.new(#787B86, 0) : color.new(#787B86, 100))
+fill(h0, h1, color = at_show_stoch ? color.new(color.rgb(33, 150, 243), 90) : color.new(color.rgb(33, 150, 243), 100), title="Background")
