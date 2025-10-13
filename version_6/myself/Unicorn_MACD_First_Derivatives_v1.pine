@@ -1,0 +1,41 @@
+//@version=6
+indicator('Unicorn MACD First Derivatives v1', overlay = false)
+
+// 输入参数
+fast_length = input.int(12, 'Fast Length', minval = 1)
+slow_length = input.int(26, 'Slow Length', minval = 1)
+signal_length = input.int(9, 'Signal Length', minval = 1)
+slope_length = input.int(3, 'Slope Lookback Period', minval = 2, tooltip = '用于计算斜率的周期数')
+bg_transparency = input.int(90, 'Background Transparency', minval = 0, maxval = 100, tooltip = '背景透明度，0为完全透明，100为不透明')
+
+// 计算MACD
+fast_ema = ta.ema(close, fast_length)
+slow_ema = ta.ema(close, slow_length)
+macd_line = fast_ema - slow_ema
+signal_line = ta.ema(macd_line, signal_length)
+histogram = macd_line - signal_line
+
+// 计算一阶导数（MACD线斜率，差分法）
+var float slope = 0.0
+if bar_index >= slope_length
+    slope := (macd_line - macd_line[slope_length]) / slope_length
+    slope
+
+// 计算二阶导数（斜率的斜率，差分法）
+var float slope_of_slope = 0.0
+if bar_index >= slope_length * 2
+    slope_prev = (macd_line[slope_length] - macd_line[slope_length * 2]) / slope_length
+    slope_of_slope := (slope - slope_prev) / slope_length
+    slope_of_slope
+
+// 绘制一阶导数（新面板）
+p1 = plot(slope, 'MACD Slope', color = color.purple, linewidth = 1, display = display.pane)
+hline(0, 'Slope Zero', color = color.gray, linestyle = hline.style_dashed)
+
+// 绘制二阶导数（新面板）
+p2 = plot(slope_of_slope, 'Slope of Slope', color = color.teal, linewidth = 1, display = display.pane)
+hline(0, 'Slope of Slope Zero', color = color.gray, linestyle = hline.style_dashed)
+
+// （基于MACD和一阶导数）
+bg_color = macd_line > 0 ? (slope > 0 ? color.new(color.green, bg_transparency) : color.new(color.yellow, bg_transparency)) : (slope < 0 ? color.new(color.red, bg_transparency) : color.new(color.blue, bg_transparency))
+bgcolor(bg_color)

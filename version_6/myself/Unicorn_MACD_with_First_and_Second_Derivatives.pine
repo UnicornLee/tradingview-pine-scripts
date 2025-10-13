@@ -1,0 +1,73 @@
+//@version=6
+indicator('MACD with First and Second Derivatives', overlay = false)
+
+// 输入参数
+fast_length = input.int(12, 'Fast Length', minval = 1)
+slow_length = input.int(26, 'Slow Length', minval = 1)
+signal_length = input.int(9, 'Signal Length', minval = 1)
+slope_length = input.int(3, 'Slope Lookback Period', minval = 2, tooltip = '用于计算斜率的周期数')
+bg_transparency = input.int(90, 'Background Transparency', minval = 0, maxval = 100, tooltip = '背景透明度，0为完全透明，100为不透明')
+
+// 计算MACD
+fast_ema = ta.ema(close, fast_length)
+slow_ema = ta.ema(close, slow_length)
+macd_line = fast_ema - slow_ema
+signal_line = ta.ema(macd_line, signal_length)
+histogram = macd_line - signal_line
+
+// 设置背景颜色（MACD线在0轴上下）
+bg_color = macd_line > 0 ? color.new(color.green, bg_transparency) : color.new(color.red, bg_transparency)
+bgcolor(bg_color)
+
+// 计算一阶导数（MACD线斜率，差分法）
+var float slope = 0.0
+if bar_index >= slope_length
+    slope := (macd_line - macd_line[slope_length]) / slope_length
+    slope
+
+// 计算二阶导数（斜率的斜率，差分法）
+var float slope_of_slope = 0.0
+if bar_index >= slope_length * 2
+    slope_prev = (macd_line[slope_length] - macd_line[slope_length * 2]) / slope_length
+    slope_of_slope := (slope - slope_prev) / slope_length
+    slope_of_slope
+
+// 绘制MACD相关线
+plot(macd_line, 'MACD Line', color = color.blue, linewidth = 2)
+plot(signal_line, 'Signal Line', color = color.orange, linewidth = 2)
+plot(histogram, 'Histogram', style = plot.style_histogram, color = histogram > 0 ? color.green : color.red)
+
+// 绘制0轴（MACD面板）
+hline(0, 'Zero Line', color = color.gray, linestyle = hline.style_dashed)
+
+// 绘制一阶导数（新面板）
+p1 = plot(slope, 'MACD Slope', color = color.purple, linewidth = 1, display = display.pane)
+hline(0, 'Slope Zero', color = color.gray, linestyle = hline.style_dashed)
+
+// 绘制二阶导数（新面板）
+p2 = plot(slope_of_slope, 'Slope of Slope', color = color.teal, linewidth = 1, display = display.pane)
+hline(0, 'Slope of Slope Zero', color = color.gray, linestyle = hline.style_dashed)
+
+// 检测0轴穿越（MACD线）
+// cross_above_zero = ta.crossover(macd_line, 0)
+// cross_below_zero = ta.crossunder(macd_line, 0)
+
+// 添加标签提示0轴穿越  这个功能与上面的背景色功能重复，没有必要
+// if cross_above_zero
+//     label.new(bar_index, macd_line, '↑ Zero Cross', color = color.green, style = label.style_label_down, textcolor = color.white)
+// if cross_below_zero
+//     label.new(bar_index, macd_line, '↓ Zero Cross', color = color.red, style = label.style_label_up, textcolor = color.white)
+
+// 表格显示最新值
+var table t = table.new(position.top_right, 3, 5, border_width = 1)
+if barstate.islast
+    table.cell(t, 0, 0, 'MACD', bgcolor = color.blue, text_color = color.white)
+    table.cell(t, 1, 0, str.tostring(macd_line, '#.##'), bgcolor = color.blue, text_color = color.white)
+    table.cell(t, 0, 1, 'Signal', bgcolor = color.orange, text_color = color.white)
+    table.cell(t, 1, 1, str.tostring(signal_line, '#.##'), bgcolor = color.orange, text_color = color.white)
+    table.cell(t, 0, 2, 'Histogram', bgcolor = histogram > 0 ? color.green : color.red, text_color = color.white)
+    table.cell(t, 1, 2, str.tostring(histogram, '#.##'), bgcolor = histogram > 0 ? color.green : color.red, text_color = color.white)
+    table.cell(t, 0, 3, 'Slope', bgcolor = color.purple, text_color = color.white)
+    table.cell(t, 1, 3, str.tostring(slope, '#.##'), bgcolor = color.purple, text_color = color.white)
+    table.cell(t, 0, 4, 'Slope of Slope', bgcolor = color.teal, text_color = color.white)
+    table.cell(t, 1, 4, str.tostring(slope_of_slope, '#.##'), bgcolor = color.teal, text_color = color.white)
