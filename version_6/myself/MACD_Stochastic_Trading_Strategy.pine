@@ -1,0 +1,259 @@
+//@version=6
+strategy(title='MACD + Stochastic 交易策略', shorttitle='MS Trade', overlay=true, default_qty_type=strategy.percent_of_equity, default_qty_value=10)
+
+// ============================================
+// 分组：基础设置
+// ============================================
+group_basic = '📌 基础设置'
+useStrategy = input.bool(true, title='启用策略', group=group_basic, inline='enable')
+strategyDirection = input.string(title='交易方向', defval='双向', options=['只做多', '只做空', '双向'], group=group_basic)
+
+// ============================================
+// 分组：时间过滤
+// ============================================
+group_time = '⏰ 时间过滤'
+useTimeFilter = input.bool(false, title='启用时间过滤', group=group_time)
+startDate = input.time(title='开始日期', defval=timestamp('2024-01-01T00:00:00'), group=group_time)
+endDate = input.time(title='结束日期', defval=timestamp('2025-12-31T23:59:59'), group=group_time)
+useWeekendFilter = input.bool(false, title='启用周末过滤', group=group_time)
+
+// ============================================
+// 分组：MACD 参数
+// ============================================
+group_macd = '📊 MACD 参数'
+macdFastLen = input.int(12, title='快速 EMA 周期', minval=1, group=group_macd)
+macdSlowLen = input.int(26, title='慢速 EMA 周期', minval=1, group=group_macd)
+macdSignalLen = input.int(9, title='信号线周期', minval=1, group=group_macd)
+
+// ============================================
+// 分组：Stochastic 参数
+// ============================================
+group_stoch = '🎲 Stochastic 参数'
+stochKLen = input.int(9, title='%K 周期', minval=1, group=group_stoch)
+stochKSmooth = input.int(3, title='%K 平滑', minval=1, group=group_stoch)
+stochDLen = input.int(3, title='%D 周期', minval=1, group=group_stoch)
+stochOBLevel = input.int(80, title='超买阈值', minval=50, maxval=100, group=group_stoch)
+stochOSLevel = input.int(20, title='超卖阈值', minval=0, maxval=50, group=group_stoch)
+
+// ============================================
+// 分组：入场触发
+// ============================================
+group_entry = '🎯 入场触发'
+lookbackBars = input.int(6, title='回溯K线数', minval=1, maxval=20, group=group_entry)
+useZeroFilter = input.bool(true, title='0轴过滤(做多:0下,做空:0上)', group=group_entry)
+
+// ============================================
+// 分组：资金管理
+// ============================================
+group_money = '💰 资金管理'
+riskType = input.string(title='下单方式', defval='固定比例', options=['固定比例', '固定金额'], group=group_money)
+fixedPercent = input.float(10.0, title='固定比例(%)', minval=0.1, maxval=100.0, step=0.1, group=group_money) / 100.0
+fixedAmount = input.float(10000.0, title='固定金额($)', minval=100.0, group=group_money)
+
+// ============================================
+// 计算 MACD
+// ============================================
+[macdLine, signalLine, histLine] = ta.macd(close, macdFastLen, macdSlowLen, macdSignalLen)
+
+// MACD 金叉/死叉
+macdBullCross = ta.crossover(macdLine, signalLine)
+macdBearCross = ta.crossunder(macdLine, signalLine)
+
+// MACD 在 0 轴上下
+macdAboveZero = macdLine > 0
+macdBelowZero = macdLine < 0
+
+// ============================================
+// 计算 Stochastic
+// ============================================
+kValue = ta.sma(ta.stoch(close, high, low, stochKLen), stochKSmooth)
+dValue = ta.sma(kValue, stochDLen)
+
+// Stochastic 穿越超买超卖线
+stochAboveOB = ta.crossunder(kValue, stochOBLevel)  // 从上向下穿越 80
+stochBelowOS = ta.crossover(kValue, stochOSLevel)   // 从下向上穿越 20
+
+// ============================================
+// 背景色标注
+// ============================================
+bgcolorPlot = input.bool(true, title='显示预备信号背景', group=group_stoch)
+
+// 预备做多区域：MACD 金叉 且 Stochastic 从下向上穿越 20
+preLongBg = bgcolorPlot and stochBelowOS and histLine > 0 ? color.new(color.green, 90) : na
+bgcolor(preLongBg)
+
+// 预备做空区域：MACD 死叉 且 Stochastic 从上向下穿越 80
+preShortBg = bgcolorPlot and stochAboveOB and histLine < 0 ? color.new(color.red, 90) : na
+bgcolor(preShortBg)
+
+// ============================================
+// 绘制 MACD 和 Stochastic（面板）
+// ============================================
+plot(macdLine, title='MACD', color=color.blue, display=display.pane)
+plot(signalLine, title='Signal', color=color.orange, display=display.pane)
+plot(histLine, title='Histogram', style=plot.style_histogram, color=histLine > 0 ? color.green : color.red, display=display.pane)
+hline(0, 'Zero', color=color.gray, linestyle=hline.style_dashed, display=display.pane)
+
+plot(kValue, title='%K', color=color.blue, display=display.pane)
+plot(dValue, title='%D', color=color.orange, display=display.pane)
+hline(stochOBLevel, 'Overbought', color=color.red, linestyle=hline.style_dashed, display=display.pane)
+hline(stochOSLevel, 'Oversold', color=color.green, linestyle=hline.style_dashed, display=display.pane)
+
+// ============================================
+// 时间过滤函数
+// ============================================
+inTimeRange = not useTimeFilter or (time >= startDate and time <= endDate)
+
+// 周末过滤 (1=周日, 6=周六)
+isWeekend = dayofweek == dayofweek.saturday or dayofweek == dayofweek.sunday
+canTrade = not useWeekendFilter or not isWeekend
+
+canTradeLong = inTimeRange and canTrade and useStrategy and (strategyDirection == '只做多' or strategyDirection == '双向')
+canTradeShort = inTimeRange and canTrade and useStrategy and (strategyDirection == '只做空' or strategyDirection == '双向')
+
+// ============================================
+// 交易信号确认
+// ============================================
+var bool longSignal = false
+var bool shortSignal = false
+var int longSignalBar = 0
+var int shortSignalBar = 0
+
+// 做多信号条件：MACD 金叉 + 0轴过滤 + Stochastic 穿越 20
+longCondition = macdBullCross and (not useZeroFilter or macdBelowZero) and kValue > stochOSLevel
+if longCondition and canTradeLong
+    longSignal := true
+    longSignalBar := bar_index
+    longSignal
+
+// 做空信号条件：MACD 死叉 + 0轴过滤 + Stochastic 穿越 80
+shortCondition = macdBearCross and (not useZeroFilter or macdAboveZero) and kValue < stochOBLevel
+if shortCondition and canTradeShort
+    shortSignal := true
+    shortSignalBar := bar_index
+    shortSignal
+
+// ============================================
+// 信号过期处理（6根K线内未触发则失效）
+// ============================================
+if longSignal and (bar_index - longSignalBar > lookbackBars)
+    longSignal := false
+    longSignal
+
+if shortSignal and (bar_index - shortSignalBar > lookbackBars)
+    shortSignal := false
+    shortSignal
+
+// ============================================
+// 触发价计算（前高/前低）
+// ============================================
+longTriggerPrice = ta.highest(high, lookbackBars)[1]  // 前一根K线起的 lookbackBars 周期内最高价
+shortTriggerPrice = ta.lowest(low, lookbackBars)[1]   // 前一根K线起的 lookbackBars 周期内最低价
+
+// 触发信号标注
+plotshape(longSignal and barstate.islast, title='Long Signal', location=location.belowbar, style=shape.triangleup, color=color.green, size=size.small, display=display.all)
+plotshape(shortSignal and barstate.islast, title='Short Signal', location=location.abovebar, style=shape.triangledown, color=color.red, size=size.small, display=display.all)
+
+// ============================================
+// 入场逻辑（突破触发价）
+// ============================================
+longEntryCondition = longSignal and close > longTriggerPrice and (bar_index - longSignalBar <= lookbackBars)
+shortEntryCondition = shortSignal and close < shortTriggerPrice and (bar_index - shortSignalBar <= lookbackBars)
+
+// 止盈止损计算
+longStopLoss = shortTriggerPrice
+longTakeProfit = close + (close - shortTriggerPrice)  // 1:1
+
+shortStopLoss = longTriggerPrice
+shortTakeProfit = close - (longTriggerPrice - close)  // 1:1
+
+// ============================================
+// 计算下单数量
+// ============================================
+calcQty() =>
+    qty = 0.0
+    if riskType == '固定比例'
+        qty := strategy.equity * fixedPercent / close
+        qty
+    else
+        qty := fixedAmount / close
+        qty
+
+// ============================================
+// 执行交易
+// ============================================
+// 取消未触发的挂单
+cancelLongOrder = longSignal and not longEntryCondition
+cancelShortOrder = shortSignal and not shortEntryCondition
+
+if cancelLongOrder
+    longSignal := false
+    longSignal
+
+if cancelShortOrder
+    shortSignal := false
+    shortSignal
+
+// 做多入场
+if longEntryCondition and canTradeLong
+    qty := calcQty()
+    strategy.entry(id='Long Entry', direction=strategy.long, qty=qty, stop=longTriggerPrice)
+    strategy.exit(id='Long Exit', from_entry='Long Entry', stop=longStopLoss, limit=longTakeProfit, comment_loss='LL', comment_profit='LP')
+
+// 做空入场
+if shortEntryCondition and canTradeShort
+    qty := calcQty()
+    strategy.entry(id='Short Entry', direction=strategy.short, qty=qty, stop=shortTriggerPrice)
+    strategy.exit(id='Short Exit', from_entry='Short Entry', stop=shortStopLoss, limit=shortTakeProfit, comment_loss='SL', comment_profit='SP')
+
+// ============================================
+// 图表标注
+// ============================================
+plotshape(longEntryCondition and barstate.islast, title='Long Entry', location=location.belowbar, style=shape.labelup, color=color.green, size=size.normal, display=display.all)
+plotshape(shortEntryCondition and barstate.islast, title='Short Entry', location=location.abovebar, style=shape.labeldown, color=color.red, size=size.normal, display=display.all)
+
+// ============================================
+// 触发价线
+// ============================================
+plot(useStrategy and longSignal ? longTriggerPrice : na, title='Long Trigger', color=color.green, style=plot.style_linebr, linewidth=1, display=display.all)
+plot(useStrategy and shortSignal ? shortTriggerPrice : na, title='Short Trigger', color=color.red, style=plot.style_linebr, linewidth=1, display=display.all)
+
+// ============================================
+// 止盈止损线（入场后显示）
+// ============================================
+plot(useStrategy and strategy.position_size > 0 ? longStopLoss : na, title='Long SL', color=color.red, style=plot.style_linebr, linewidth=1, display=display.all)
+plot(useStrategy and strategy.position_size > 0 ? longTakeProfit : na, title='Long TP', color=color.green, style=plot.style_linebr, linewidth=1, display=display.all)
+plot(useStrategy and strategy.position_size < 0 ? shortStopLoss : na, title='Short SL', color=color.red, style=plot.style_linebr, linewidth=1, display=display.all)
+plot(useStrategy and strategy.position_size < 0 ? shortTakeProfit : na, title='Short TP', color=color.green, style=plot.style_linebr, linewidth=1, display=display.all)
+
+// ============================================
+// 信息面板
+// ============================================
+var table infoTable = table.new(position.top_right, 2, 8, border_width=1, frame_color=color.gray, frame_width=1)
+
+if barstate.islast
+    table.cell(infoTable, 0, 0, 'MACD', bgcolor=color.blue, text_color=color.white, text_size=size.small)
+    table.cell(infoTable, 1, 0, str.tostring(macdLine, '#.####'), bgcolor=color.blue, text_color=color.white, text_size=size.small)
+    table.cell(infoTable, 0, 1, 'Signal', bgcolor=color.orange, text_color=color.white, text_size=size.small)
+    table.cell(infoTable, 1, 1, str.tostring(signalLine, '#.####'), bgcolor=color.orange, text_color=color.white, text_size=size.small)
+    table.cell(infoTable, 0, 2, '%K', bgcolor=color.blue, text_color=color.white, text_size=size.small)
+    table.cell(infoTable, 1, 2, str.tostring(kValue, '#.##'), bgcolor=color.blue, text_color=color.white, text_size=size.small)
+    table.cell(infoTable, 0, 3, '%D', bgcolor=color.orange, text_color=color.white, text_size=size.small)
+    table.cell(infoTable, 1, 3, str.tostring(dValue, '#.##'), bgcolor=color.orange, text_color=color.white, text_size=size.small)
+    table.cell(infoTable, 0, 4, 'Long Trigger', bgcolor=longSignal ? color.green : color.gray, text_color=color.white, text_size=size.small)
+    table.cell(infoTable, 1, 4, longSignal ? str.tostring(longTriggerPrice, '#.##') : '-', bgcolor=longSignal ? color.green : color.gray, text_color=color.white, text_size=size.small)
+    table.cell(infoTable, 0, 5, 'Short Trigger', bgcolor=shortSignal ? color.red : color.gray, text_color=color.white, text_size=size.small)
+    table.cell(infoTable, 1, 5, shortSignal ? str.tostring(shortTriggerPrice, '#.##') : '-', bgcolor=shortSignal ? color.red : color.gray, text_color=color.white, text_size=size.small)
+    table.cell(infoTable, 0, 6, 'Position', bgcolor=color.gray, text_color=color.white, text_size=size.small)
+    posText = strategy.position_size > 0 ? 'Long' : strategy.position_size < 0 ? 'Short' : 'Flat'
+    table.cell(infoTable, 1, 6, posText, bgcolor=color.gray, text_color=color.white, text_size=size.small)
+    table.cell(infoTable, 0, 7, 'Equity', bgcolor=color.purple, text_color=color.white, text_size=size.small)
+    table.cell(infoTable, 1, 7, str.tostring(strategy.equity, '$#,##0.00'), bgcolor=color.purple, text_color=color.white, text_size=size.small)
+
+// ============================================
+// 警报条件
+// ============================================
+alertcondition(longCondition, title='做多预备信号', message='MACD 金叉 + Stochastic 穿越 20 - 预备做多')
+alertcondition(shortCondition, title='做空预备信号', message='MACD 死叉 + Stochastic 穿越 80 - 预备做空')
+alertcondition(longEntryCondition, title='做多入场触发', message='价格突破触发价 - 执行做多入场')
+alertcondition(shortEntryCondition, title='做空入场触发', message='价格跌破触发价 - 执行做空入场')

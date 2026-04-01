@@ -1,0 +1,169 @@
+//@version=6
+indicator(title='DOMA 方向振荡器', shorttitle='DOMA', overlay=false)
+
+// ============================================
+// 分组：DOMA 参数
+// ============================================
+group_doma = '📊 DOMA 参数'
+emaPeriod = input.int(30, title='EMA 周期', minval=2, maxval=500, group=group_doma)
+domaPeriod = input.int(50, title='DOMA 统计周期', minval=5, maxval=100, group=group_doma)
+showMultipleEMA = input.bool(true, title='显示多周期 EMA', group=group_doma)
+
+// ============================================
+// 分组：阈值设置
+// ============================================
+group_threshold = '🎯 阈值设置'
+domaHighLevel = input.int(6, title='高阈值 (趋势可能)', minval=2, maxval=50, group=group_threshold)
+domaLowLevel = input.int(2, title='低阈值 (随机市场)', minval=1, maxval=20, group=group_threshold)
+
+// ============================================
+// 分组：显示设置
+// ============================================
+group_display = '🎨 显示设置'
+showDOMALine = input.bool(true, title='显示 DOMA 线', group=group_display)
+showThresholdLines = input.bool(true, title='显示阈值线', group=group_display)
+bgTransparency = input.int(85, title='背景透明度', minval=0, maxval=100, group=group_display)
+useGradientBg = input.bool(true, title='渐变背景色', group=group_display)
+
+// ============================================
+// 计算 EMA
+// ============================================
+emaFast = ta.ema(close, 20)
+emaMedium = ta.ema(close, emaPeriod)
+emaSlow = ta.ema(close, 60)
+
+// 绘制多周期 EMA（叠加图）
+plot(showMultipleEMA ? emaFast : na, title='EMA 50', color=color.new(color.orange, 0), linewidth=1)
+plot(showMultipleEMA ? emaMedium : na, title='EMA Mid', color=color.new(color.blue, 0), linewidth=2)
+plot(showMultipleEMA ? emaSlow : na, title='EMA 200', color=color.new(color.purple, 0), linewidth=1)
+
+// ============================================
+// 计算 DOMA（核心算法）
+// ============================================
+// DOMA = 一段时间内价格穿越 EMA 的次数
+
+// 检测穿越
+aboveEMA = close > emaMedium
+aboveEMAPrev = close[1] > emaMedium[1]
+
+// 金叉（价格从下穿越到上）
+crossAbove = aboveEMA and not aboveEMAPrev
+// 死叉（价格从上穿越到下）
+crossBelow = not aboveEMA and aboveEMAPrev
+
+// 累计 DOMA 周期内的穿越次数
+var int domaValue = 0
+var int domaBullCount = 0  // 向上穿越次数
+var int domaBearCount = 0  // 向下穿越次数
+
+// 每根K线更新统计
+if bar_index >= domaPeriod
+    // 计算过去 domaPeriod 根K线内的穿越次数
+    domaBullCount := 0
+    domaBearCount := 0
+    
+    for i = 1 to domaPeriod
+        if close[i] > emaMedium[i] and close[i + 1] <= emaMedium[i + 1]
+            domaBullCount := domaBullCount + 1
+        if close[i] < emaMedium[i] and close[i + 1] >= emaMedium[i + 1]
+            domaBearCount := domaBearCount + 1
+    
+    domaValue := domaBullCount + domaBearCount
+
+// ============================================
+// DOMA 信号判断
+// ============================================
+// DOMA 高值区域 = 真实市场（趋势可能酝酿）
+// DOMA 低值区域 = 随机市场（盘整）
+
+isHighDOMA = domaValue >= domaHighLevel
+isLowDOMA = domaValue <= domaLowLevel
+isMediumDOMA = not isHighDOMA and not isLowDOMA
+
+// 多空倾向判断（基于向上/向下穿越比例）
+bullRatio = domaBullCount / math.max(domaValue, 1)
+isBullishBias = bullRatio > 0.6  // 向上穿越多于向下穿越
+isBearishBias = bullRatio < 0.4  // 向下穿越多于向上穿越
+
+// ============================================
+// 背景色标注
+// ============================================
+bgColor = if useGradientBg
+    if domaValue >= domaHighLevel
+        isBullishBias ? color.new(color.green, bgTransparency) : isBearishBias ? color.new(color.red, bgTransparency) : color.new(color.yellow, bgTransparency)
+    else if domaValue <= domaLowLevel
+        color.new(color.gray, bgTransparency)
+    else
+        color.new(color.blue, bgTransparency)
+else
+    isHighDOMA ? (isBullishBias ? color.new(color.green, bgTransparency) : isBearishBias ? color.new(color.red, bgTransparency) : color.new(color.yellow, bgTransparency)) : isLowDOMA ? color.new(color.gray, bgTransparency) : color.new(color.blue, bgTransparency)
+
+bgcolor(bgColor)
+
+// ============================================
+// 绘制 DOMA
+// ============================================
+plot(showDOMALine ? domaValue : na, title='DOMA', color=isHighDOMA ? color.orange : color.gray, linewidth=2, style=plot.style_histogram)
+
+// 阈值线
+plot(showThresholdLines ? float(domaHighLevel) : na, title='高阈值', color=color.red, linestyle=plot.linestyle_dashed, linewidth=1)
+plot(showThresholdLines ? float(domaLowLevel) : na, title='低阈值', color=color.green, linestyle=plot.linestyle_dashed, linewidth=1)
+
+// DOMA 移动平均线（平滑 DOMA）
+domaMA = ta.sma(domaValue, 5)
+plot(showDOMALine ? domaMA : na, title='DOMA MA', color=color.purple, linewidth=1)
+
+// ============================================
+// 市场状态标签
+// ============================================
+var label domaLabel = na
+label.delete(domaLabel)
+
+// 市场状态文字
+marketStateText = isHighDOMA ? (isBullishBias ? '🔴 高DOMA-看多倾向' : 
+                                isBearishBias ? '🔴 高DOMA-看空倾向' : 
+                                '🔴 高DOMA-趋势酝酿中') : 
+                 isLowDOMA ? '⚪ 低DOMA-随机市场' : '🔵 中DOMA-无明显趋势'
+
+if barstate.islast and not na(domaValue)
+    domaLabel := label.new(x=bar_index - domaPeriod / 2, y=domaValue, text=marketStateText, 
+         color=isHighDOMA ? color.orange : isLowDOMA ? color.gray : color.blue, 
+         textcolor=color.white, style=label.style_label_left, size=size.normal)
+
+// ============================================
+// 信息面板
+// ============================================
+var table infoTable = table.new(position.top_right, 2, 10, border_width=1, frame_color=color.gray, frame_width=1)
+
+if barstate.islast
+    table.cell(infoTable, 0, 0, 'DOMA 值', bgcolor=color.blue, text_color=color.white, text_size=size.small)
+    table.cell(infoTable, 1, 0, str.tostring(domaValue), bgcolor=color.blue, text_color=color.white, text_size=size.small)
+    table.cell(infoTable, 0, 1, '上穿次数', bgcolor=color.green, text_color=color.white, text_size=size.small)
+    table.cell(infoTable, 1, 1, str.tostring(domaBullCount), bgcolor=color.green, text_color=color.white, text_size=size.small)
+    table.cell(infoTable, 0, 2, '下穿次数', bgcolor=color.red, text_color=color.white, text_size=size.small)
+    table.cell(infoTable, 1, 2, str.tostring(domaBearCount), bgcolor=color.red, text_color=color.white, text_size=size.small)
+    table.cell(infoTable, 0, 3, '市场状态', bgcolor=isHighDOMA ? color.orange : isLowDOMA ? color.gray : color.blue, text_color=color.white, text_size=size.small)
+    table.cell(infoTable, 1, 3, isHighDOMA ? '趋势酝酿' : isLowDOMA ? '随机盘整' : '中性', bgcolor=isHighDOMA ? color.orange : isLowDOMA ? color.gray : color.blue, text_color=color.white, text_size=size.small)
+    table.cell(infoTable, 0, 4, 'EMA ' + str.tostring(emaPeriod), bgcolor=color.blue, text_color=color.white, text_size=size.small)
+    table.cell(infoTable, 1, 4, str.tostring(emaMedium, '#.##'), bgcolor=color.blue, text_color=color.white, text_size=size.small)
+    table.cell(infoTable, 0, 5, 'Bias', bgcolor=isBullishBias ? color.green : isBearishBias ? color.red : color.gray, text_color=color.white, text_size=size.small)
+    table.cell(infoTable, 1, 5, isBullishBias ? 'Bullish ↑' : isBearishBias ? 'Bearish ↓' : 'Neutral →', bgcolor=isBullishBias ? color.green : isBearishBias ? color.red : color.gray, text_color=color.white, text_size=size.small)
+    table.cell(infoTable, 0, 6, '收盘价', bgcolor=color.gray, text_color=color.white, text_size=size.small)
+    table.cell(infoTable, 1, 6, str.tostring(close, '#.##'), bgcolor=color.gray, text_color=color.white, text_size=size.small)
+    table.cell(infoTable, 0, 7, '距 EMA', bgcolor=close > emaMedium ? color.green : color.red, text_color=color.white, text_size=size.small)
+    pctFromEMA = (close - emaMedium) / emaMedium * 100
+    table.cell(infoTable, 1, 7, str.tostring(pctFromEMA, '#.#') + '%', bgcolor=close > emaMedium ? color.green : color.red, text_color=color.white, text_size=size.small)
+
+// ============================================
+// 穿越标注
+// ============================================
+plotshape(crossAbove and bar_index >= domaPeriod, title='上穿 EMA', location=location.top, style=shape.triangleup, color=color.green, size=size.tiny, display=display.all)
+plotshape(crossBelow and bar_index >= domaPeriod, title='下穿 EMA', location=location.bottom, style=shape.triangledown, color=color.red, size=size.tiny, display=display.all)
+
+// ============================================
+// 警报条件
+// ============================================
+alertcondition(isHighDOMA and isBullishBias, title='高DOMA看多信号', message='DOMA 达到高值且价格倾向向上，可能酝酿上涨趋势')
+alertcondition(isHighDOMA and isBearishBias, title='高DOMA看空信号', message='DOMA 达到高值且价格倾向向下，可能酝酿下跌趋势')
+alertcondition(crossAbove, title='价格上穿EMA', message='价格上穿 EMA')
+alertcondition(crossBelow, title='价格下穿EMA', message='价格下穿 EMA')
